@@ -1,0 +1,8 @@
+.env
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+meeting_notes*.md
+real_groq_test.md

@@ -1,0 +1,4 @@
+Alice: We will launch the MVP Friday.
+Bob: I will finish the authentication tests tomorrow.
+Sarah: I will send the landing page copy by Thursday; it is blocking the launch page.
+Alice: Let's review testing status Friday at 3 PM.
