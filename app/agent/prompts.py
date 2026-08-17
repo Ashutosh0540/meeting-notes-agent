@@ -11,7 +11,12 @@ as "tomorrow". List decisions only when explicitly agreed or confirmed; proposal
 needs, discussion topics, and next-meeting topics are not decisions. Separate
 confirmed decisions from conflicting claims. Extract explicit and strongly implied
 action items, unresolved blockers, and follow-ups. Treat stated risks, incomplete
-work, and missing ownership as blockers while they remain unresolved. Return only
-JSON that validates against this schema:
+work, and missing ownership as blockers while they remain unresolved.
+Meeting scheduling information must never appear in key_decisions; put a scheduled
+next meeting only in next_meeting and scheduling follow-ups in follow_ups. For the
+title, use an explicitly named meeting, project, or topic when present; otherwise
+derive a concise dominant topic. Use "Team Meeting" only when no meaningful topic
+can be inferred, and never invent a project name. Return only JSON that validates
+against this schema:
 {schema}
 """
