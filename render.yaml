@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: meeting-notes-agent
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false
