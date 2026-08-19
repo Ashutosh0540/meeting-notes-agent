@@ -23,3 +23,9 @@ Open Swagger at [http://localhost:8000/docs](http://localhost:8000/docs).
 Create a new Web Service, connect `Ashutosh0540/meeting-notes-agent`, and use its
 Dockerfile. Set `GROQ_API_KEY`, `GROQ_MODEL`, and `LLM_PROVIDER` in Render's
 environment configuration, then deploy. Render uses `/health` for health checks.
+
+## Supabase PostgreSQL
+
+Create a Supabase project, copy its PostgreSQL connection string, and set it as
+`DATABASE_URL` in your local `.env`. Set the same environment variable in Render
+when you are ready to deploy persistence.

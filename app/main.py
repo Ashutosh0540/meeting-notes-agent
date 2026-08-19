@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+from uuid import UUID
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence, TextIO
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 
+from app import db
 from app.agent.markdown import format_markdown
 from app.agent.meeting_agent import MeetingAgent
 from app.agent.schemas import MeetingNotes
+from app.models import ActionItem as ActionItemModel
+from app.models import Decision as DecisionModel
+from app.models import Meeting
 from app.providers.base import LLMProvider, ProviderError
 from app.providers.groq import GroqProvider
 
@@ -24,10 +31,23 @@ app = FastAPI(
     title="Meeting Notes Agent",
     description="Extract structured meeting intelligence from transcripts.",
 )
+logger = logging.getLogger(__name__)
 
 
 class AnalyzeMeetingRequest(BaseModel):
     transcript: str
+
+
+class AnalyzeMeetingResponse(MeetingNotes):
+    meeting_id: UUID
+
+
+@app.on_event("startup")
+def initialize_database() -> None:
+    try:
+        db.init_db()
+    except SQLAlchemyError:
+        logger.exception("Database initialization failed")
 
 
 @app.get("/health")
@@ -35,16 +55,53 @@ def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@app.post("/api/v1/meetings/analyze", response_model=MeetingNotes)
-def analyze_meeting(request: AnalyzeMeetingRequest) -> MeetingNotes:
+@app.post("/api/v1/meetings/analyze", response_model=AnalyzeMeetingResponse)
+def analyze_meeting(request: AnalyzeMeetingRequest) -> AnalyzeMeetingResponse:
     if not request.transcript.strip():
         raise HTTPException(status_code=400, detail="Transcript cannot be empty.")
     provider = getattr(app.state, "provider", GroqProvider())
     try:
-        return MeetingAgent(provider).analyze(request.transcript)
+        notes = MeetingAgent(provider).analyze(request.transcript)
     except ProviderError as error:
         detail = "LLM provider is not configured." if "not configured" in str(error) else "Meeting analysis failed."
         raise HTTPException(status_code=503, detail=detail) from error
+
+    session_factory = getattr(app.state, "session_factory", db.SessionLocal)
+    if session_factory is None:
+        raise HTTPException(status_code=503, detail="Database is not configured.")
+    session = None
+    try:
+        session = session_factory()
+        meeting = Meeting(
+            title=notes.title,
+            transcript=request.transcript,
+            executive_summary=notes.executive_summary,
+            next_meeting=notes.next_meeting,
+            blockers=notes.blockers,
+            follow_ups=notes.follow_ups,
+            decisions=[DecisionModel(decision=item.decision, rationale=item.rationale) for item in notes.key_decisions],
+            action_items=[
+                ActionItemModel(
+                    task=item.task,
+                    owner=item.owner,
+                    due_date=item.due_date,
+                    priority=item.priority,
+                )
+                for item in notes.action_items
+            ],
+        )
+        session.add(meeting)
+        session.commit()
+        session.refresh(meeting)
+    except SQLAlchemyError as error:
+        if session is not None:
+            session.rollback()
+        logger.exception("Meeting persistence failed")
+        raise HTTPException(status_code=503, detail="Meeting notes could not be saved.") from error
+    finally:
+        if session is not None:
+            session.close()
+    return AnalyzeMeetingResponse(meeting_id=meeting.id, **notes.model_dump())
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
