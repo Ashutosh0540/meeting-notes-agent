@@ -10,12 +10,13 @@ from typing import Optional, Sequence, TextIO
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import db
 from app.agent.markdown import format_markdown
 from app.agent.meeting_agent import MeetingAgent
-from app.agent.schemas import MeetingNotes
+from app.agent.schemas import ActionItem, Decision, MeetingNotes
 from app.models import ActionItem as ActionItemModel
 from app.models import Decision as DecisionModel
 from app.models import Meeting
@@ -42,6 +43,52 @@ class AnalyzeMeetingResponse(MeetingNotes):
     meeting_id: UUID
 
 
+class StoredActionItem(ActionItem):
+    status: str
+
+
+class MeetingListItem(BaseModel):
+    meeting_id: UUID
+    title: str
+    created_at: datetime
+    next_meeting: str | None
+
+
+class MeetingDetail(BaseModel):
+    meeting_id: UUID
+    title: str
+    executive_summary: str
+    key_decisions: list[Decision]
+    action_items: list[StoredActionItem]
+    blockers: list[str]
+    follow_ups: list[str]
+    next_meeting: str | None
+    created_at: datetime
+
+
+def meeting_detail(meeting: Meeting) -> MeetingDetail:
+    return MeetingDetail(
+        meeting_id=meeting.id,
+        title=meeting.title,
+        executive_summary=meeting.executive_summary,
+        key_decisions=[Decision(decision=item.decision, rationale=item.rationale) for item in meeting.decisions],
+        action_items=[
+            StoredActionItem(
+                task=item.task,
+                owner=item.owner,
+                due_date=item.due_date,
+                priority=item.priority,
+                status=item.status,
+            )
+            for item in meeting.action_items
+        ],
+        blockers=meeting.blockers,
+        follow_ups=meeting.follow_ups,
+        next_meeting=meeting.next_meeting,
+        created_at=meeting.created_at,
+    )
+
+
 @app.on_event("startup")
 def initialize_database() -> None:
     try:
@@ -53,6 +100,44 @@ def initialize_database() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.get("/api/v1/meetings", response_model=list[MeetingListItem])
+def list_meetings() -> list[MeetingListItem]:
+    session_factory = getattr(app.state, "session_factory", db.SessionLocal)
+    if session_factory is None:
+        raise HTTPException(status_code=503, detail="Database is not configured.")
+    try:
+        with session_factory() as session:
+            meetings = session.scalars(select(Meeting).order_by(Meeting.created_at.desc())).all()
+            return [
+                MeetingListItem(
+                    meeting_id=meeting.id,
+                    title=meeting.title,
+                    created_at=meeting.created_at,
+                    next_meeting=meeting.next_meeting,
+                )
+                for meeting in meetings
+            ]
+    except SQLAlchemyError as error:
+        logger.exception("Meeting history query failed")
+        raise HTTPException(status_code=503, detail="Meeting history could not be loaded.") from error
+
+
+@app.get("/api/v1/meetings/{meeting_id}", response_model=MeetingDetail)
+def get_meeting(meeting_id: UUID) -> MeetingDetail:
+    session_factory = getattr(app.state, "session_factory", db.SessionLocal)
+    if session_factory is None:
+        raise HTTPException(status_code=503, detail="Database is not configured.")
+    try:
+        with session_factory() as session:
+            meeting = session.get(Meeting, meeting_id)
+            if meeting is None:
+                raise HTTPException(status_code=404, detail="Meeting not found")
+            return meeting_detail(meeting)
+    except SQLAlchemyError as error:
+        logger.exception("Meeting lookup failed")
+        raise HTTPException(status_code=503, detail="Meeting could not be loaded.") from error
 
 
 @app.post("/api/v1/meetings/analyze", response_model=AnalyzeMeetingResponse)

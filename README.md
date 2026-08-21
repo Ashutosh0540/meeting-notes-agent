@@ -29,3 +29,7 @@ environment configuration, then deploy. Render uses `/health` for health checks.
 Create a Supabase project, copy its PostgreSQL connection string, and set it as
 `DATABASE_URL` in your local `.env`. Set the same environment variable in Render
 when you are ready to deploy persistence.
+
+For Docker environments without IPv6 connectivity, use Supabase's Session Pooler
+connection URI for `DATABASE_URL`; direct database URIs remain suitable for local
+development when reachable.
